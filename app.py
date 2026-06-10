@@ -5,9 +5,9 @@ from google import genai
 from google.genai import types
 
 # 1. 網頁頁面設定
-st.set_page_config(page_title="醫療專科 雲端 AI 語音轉錄系統", layout="centered")
-st.title("🩺 醫療專科 雲端 AI 語音轉錄系統")
-st.subheader("運行環境: 雲端完全託管 (支援醫學術語強化)")
+st.set_page_config(page_title="醫療專科 雲端 AI 批次語音轉錄系統", layout="centered")
+st.title("🩺 醫療專科 雲端 AI 批次語音轉錄系統")
+st.subheader("運行環境: 雲端完全託管 (支援多檔案同時上傳)")
 
 # 2. 讀取 Google AI API Key
 if "GEMINI_API_KEY" in st.secrets:
@@ -20,20 +20,24 @@ if not api_key:
 else:
     client = genai.Client(api_key=api_key)
 
-    st.info("💡 系統已針對智慧醫療（FHIR, SNOMED CT, PACS 等）進行術語識別優化。")
+    st.info("💡 系統已優化批次處理功能，您可以一次拖入多個音訊檔案進行自動化轉錄。")
     
-    # 檔案上傳
-    uploaded_file = st.file_uploader("請選擇並上傳會議或演講音訊", type=["m4a", "mp3", "wav", "mp4"])
+    # 💡 關鍵更動：開啟 accept_multiple_files=True
+    uploaded_files = st.file_uploader(
+        "請選擇並上傳一個或多個會議音訊檔案", 
+        type=["m4a", "mp3", "wav", "mp4"],
+        accept_multiple_files=True
+    )
 
-    if uploaded_file is not None:
-        st.audio(uploaded_file)
-        
-        # 💡 自動動態生成下載檔名（例如：會議記錄.m4a -> 會議記錄.txt）
-        original_filename = Path(uploaded_file.name).stem  # 取得不含副檔名的主檔名
-        download_filename = f"{original_filename}.txt"    # 組合出新的 txt 檔名
+    # 用來存放所有檔案轉錄結果的字典
+    if "batch_outputs" not in st.session_state:
+        st.session_state["batch_outputs"] = {}
+
+    if uploaded_files:
+        st.write(f"📋 已選取 {len(uploaded_files)} 個檔案，準備進行批次處理。")
         
         # 3. 建立專屬的醫療術語強化提示詞
-        with st.expander("🩺 醫療資訊專家提示詞設定 (已啟用)", expanded=True):
+        with st.expander("🩺 醫療資訊專家提示詞設定 (已啟用)", expanded=False):
             medical_prompt = st.text_area(
                 "給 AI 的指導原則：",
                 value=(
@@ -47,10 +51,21 @@ else:
                 height=200
             )
 
-        # 4. 開始執行轉錄
-        if st.button("🚀 開始智慧醫療語音轉錄", type="primary"):
-            with st.spinner("正在由雲端 Gemini 醫療領域模型進行深度轉錄與校正..."):
+        # 4. 開始批次執行轉錄
+        if st.button("🚀 開始批次智慧醫療轉錄", type="primary"):
+            # 建立一個進度條
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            # 清空舊的紀錄
+            st.session_state["batch_outputs"] = {}
+            
+            for index, uploaded_file in enumerate(uploaded_files):
+                filename = uploaded_file.name
+                status_text.markdown(f"⏳ 正在處理 ({index+1}/{len(uploaded_files)}): **{filename}**")
+                
                 try:
+                    # 讀取單一檔案二進位資料
                     audio_bytes = uploaded_file.read()
                     audio_part = types.Part.from_bytes(
                         data=audio_bytes,
@@ -60,29 +75,57 @@ else:
                     # 呼叫 Gemini 2.5 模型
                     response = client.models.generate_content(
                         model='gemini-2.5-flash',
-                        contents=[
-                            medical_prompt,
-                            audio_part
-                        ]
+                        contents=[medical_prompt, audio_part]
                     )
                     
-                    # 將轉錄結果存入 st.session_state 確保重新渲染時資料不會消失
-                    st.session_state["transcript_output"] = response.text
-                    st.success("✨ 轉錄與術語校正完成！")
+                    # 將結果存入 session_state
+                    st.session_state["batch_outputs"][filename] = response.text
                     
                 except Exception as e:
-                    st.error(f"❌ 轉錄過程中發生錯誤: {e}")
+                    st.session_state["batch_outputs"][filename] = f"❌ 轉錄發生錯誤: {e}"
+                
+                # 更新進度條
+                progress_bar.progress((index + 1) / len(uploaded_files))
+                
+            status_text.success("✨ 所有檔案批次處理完成！")
+            progress_bar.empty()
 
-        # 5. 顯示結果與提供下載（若 session_state 中有結果才顯示）
-        if "transcript_output" in st.session_state:
-            st.markdown("### 📝 轉錄文本結果")
-            transcript_text = st.session_state["transcript_output"]
-            st.text_area("結果預覽：", value=transcript_text, height=400)
+        # 5. 顯示批次結果與下載區塊
+        if st.session_state["batch_outputs"]:
+            st.write("---")
+            st.markdown("### 📥 轉錄結果下載與預覽")
             
-            # 動態帶入 download_filename
+            # 建立打包合併的文字
+            combined_text = ""
+            
+            # 用分頁 (Tabs) 的方式呈現各個檔案的結果，介面比較整齊
+            file_names = list(st.session_state["batch_outputs"].keys())
+            tabs = st.tabs(file_names)
+            
+            for i, filename in enumerate(file_names):
+                with tabs[i]:
+                    file_text = st.session_state["batch_outputs"][filename]
+                    st.text_area(f"{filename} 的轉錄內容", value=file_text, height=300, key=f"txt_{filename}")
+                    
+                    # 個別下載按鈕（自動對齊檔名）
+                    stem_name = Path(filename).stem
+                    st.download_button(
+                        label=f"📥 下載單檔：{stem_name}.txt",
+                        data=file_text,
+                        file_name=f"{stem_name}.txt",
+                        mime="text/plain",
+                        key=f"dl_{filename}"
+                    )
+                    
+                    # 併入總文本
+                    combined_text += f"=== 檔案名稱: {filename} ===\n{file_text}\n\n"
+            
+            # 提供一鍵下載全部合併包的功能
+            st.write("---")
             st.download_button(
-                label=f"📥 下載醫療會議轉錄檔 ({download_filename})",
-                data=transcript_text,
-                file_name=download_filename,
-                mime="text/plain"
+                label="📦 一鍵下載所有檔案合併轉錄檔 (combined_all.txt)",
+                data=combined_text,
+                file_name="combined_all.txt",
+                mime="text/plain",
+                type="secondary"
             )
