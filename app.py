@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import streamlit as st
 from google import genai
 from google.genai import types
@@ -27,7 +28,11 @@ else:
     if uploaded_file is not None:
         st.audio(uploaded_file)
         
-       # 3. 建立專屬的醫療術語強化提示詞（加入 LOINC 支援）
+        # 💡 自動動態生成下載檔名（例如：會議記錄.m4a -> 會議記錄.txt）
+        original_filename = Path(uploaded_file.name).stem  # 取得不含副檔名的主檔名
+        download_filename = f"{original_filename}.txt"    # 組合出新的 txt 檔名
+        
+        # 3. 建立專屬的醫療術語強化提示詞
         with st.expander("🩺 醫療資訊專家提示詞設定 (已啟用)", expanded=True):
             medical_prompt = st.text_area(
                 "給 AI 的指導原則：",
@@ -53,7 +58,6 @@ else:
                     )
                     
                     # 呼叫 Gemini 2.5 模型
-                    # 提示詞直接包含了上下文範例，這在 LLM 術語中叫 Few-shot / Context Priming
                     response = client.models.generate_content(
                         model='gemini-2.5-flash',
                         contents=[
@@ -62,19 +66,23 @@ else:
                         ]
                     )
                     
+                    # 將轉錄結果存入 st.session_state 確保重新渲染時資料不會消失
+                    st.session_state["transcript_output"] = response.text
                     st.success("✨ 轉錄與術語校正完成！")
-                    
-                    # 5. 顯示結果與提供下載
-                    st.markdown("### 📝 轉錄文本結果")
-                    transcript_text = response.text
-                    st.text_area("結果預覽：", value=transcript_text, height=400)
-                    
-                    st.download_button(
-                        label="📥 下載醫療會議轉錄檔 (TXT)",
-                        data=transcript_text,
-                        file_name="medical_transcript.txt",
-                        mime="text/plain"
-                    )
                     
                 except Exception as e:
                     st.error(f"❌ 轉錄過程中發生錯誤: {e}")
+
+        # 5. 顯示結果與提供下載（若 session_state 中有結果才顯示）
+        if "transcript_output" in st.session_state:
+            st.markdown("### 📝 轉錄文本結果")
+            transcript_text = st.session_state["transcript_output"]
+            st.text_area("結果預覽：", value=transcript_text, height=400)
+            
+            # 動態帶入 download_filename
+            st.download_button(
+                label=f"📥 下載醫療會議轉錄檔 ({download_filename})",
+                data=transcript_text,
+                file_name=download_filename,
+                mime="text/plain"
+            )
