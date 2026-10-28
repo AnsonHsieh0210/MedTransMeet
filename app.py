@@ -18,13 +18,14 @@ MIME_TYPES = {
     ".mp4": "video/mp4",
 }
 
-# 2. 讀取 Google AI API Key（優先讀環境變數；無 secrets.toml 時 st.secrets 會拋錯）
-api_key = os.environ.get("GEMINI_API_KEY")
-if not api_key:
-    try:
-        api_key = st.secrets["GEMINI_API_KEY"]
-    except Exception:
-        api_key = None
+# 檔案在 Gemini 雲端處理的最長等待時間（秒）
+PROCESSING_TIMEOUT = 600
+
+# 2. 讀取 Google AI API Key（st.secrets 優先；無 secrets.toml 時 st.secrets 會拋錯，改讀環境變數）
+try:
+    api_key = st.secrets["GEMINI_API_KEY"]
+except Exception:
+    api_key = os.environ.get("GEMINI_API_KEY")
 
 if not api_key:
     st.error("🔑 尚未偵測到 GEMINI_API_KEY！請在 Streamlit Cloud 的 App settings → Secrets 設定。")
@@ -43,6 +44,9 @@ else:
     # 用來存放所有檔案轉錄結果的字典
     if "batch_outputs" not in st.session_state:
         st.session_state["batch_outputs"] = {}
+    # 雲端刪除失敗的檔案（需提醒使用者手動處理）
+    if "delete_failures" not in st.session_state:
+        st.session_state["delete_failures"] = []
 
     if uploaded_files:
         st.write(f"📋 已選取 {len(uploaded_files)} 個檔案，準備進行批次處理。")
@@ -70,14 +74,25 @@ else:
             
             # 清空舊的紀錄
             st.session_state["batch_outputs"] = {}
+            st.session_state["delete_failures"] = []
             
             for index, uploaded_file in enumerate(uploaded_files):
                 filename = uploaded_file.name
-                status_text.markdown(f"⏳ 正在處理 ({index+1}/{len(uploaded_files)}): **{filename}**")
+                # 同名檔案加上編號，避免結果互相覆蓋
+                result_key = filename
+                dup = 2
+                while result_key in st.session_state["batch_outputs"]:
+                    result_key = f"{Path(filename).stem} ({dup}){Path(filename).suffix}"
+                    dup += 1
+                step = f"({index+1}/{len(uploaded_files)}): **{result_key}**"
+                status_text.markdown(f"⏳ 正在上傳 {step}")
                 
                 gemini_file = None
                 try:
-                    mime_type = MIME_TYPES[Path(filename).suffix.lower()]
+                    suffix = Path(filename).suffix.lower()
+                    mime_type = MIME_TYPES.get(suffix)
+                    if mime_type is None:
+                        raise ValueError(f"不支援的檔案格式「{suffix or '無副檔名'}」，僅支援 {', '.join(MIME_TYPES)}")
                     
                     # 透過 Files API 上傳（避開 inline 資料約 20MB 的請求上限，支援長時間會議錄音）
                     uploaded_file.seek(0)
@@ -86,32 +101,40 @@ else:
                         config=types.UploadFileConfig(mime_type=mime_type, display_name=filename),
                     )
                     
-                    # 等待雲端處理完成
+                    # 等待雲端處理完成（設有逾時，避免單一檔案卡住整個批次）
+                    status_text.markdown(f"⏳ 雲端處理中 {step}")
+                    deadline = time.monotonic() + PROCESSING_TIMEOUT
                     while gemini_file.state == types.FileState.PROCESSING:
+                        if time.monotonic() > deadline:
+                            raise TimeoutError(f"雲端處理超過 {PROCESSING_TIMEOUT // 60} 分鐘仍未完成")
                         time.sleep(2)
                         gemini_file = client.files.get(name=gemini_file.name)
                     if gemini_file.state == types.FileState.FAILED:
                         raise RuntimeError("Gemini 檔案處理失敗")
                     
-                    # 呼叫 Gemini 2.5 模型
+                    # 呼叫 Gemini 3.8 Flash 模型
+                    status_text.markdown(f"⏳ 轉錄中 {step}")
                     response = client.models.generate_content(
-                        model='gemini-2.5-flash',
+                        model='gemini-3.8-flash',
                         contents=[medical_prompt, gemini_file]
                     )
                     
                     # 將結果存入 session_state
-                    st.session_state["batch_outputs"][filename] = response.text
+                    # response.text 在內容被安全機制阻擋或無輸出時為 None
+                    if not response.text:
+                        raise RuntimeError("模型未回傳轉錄內容（可能遭安全機制阻擋或輸出為空）")
+                    st.session_state["batch_outputs"][result_key] = response.text
                     
                 except Exception as e:
-                    st.session_state["batch_outputs"][filename] = f"❌ 轉錄發生錯誤: {e}"
+                    st.session_state["batch_outputs"][result_key] = f"❌ 轉錄發生錯誤: {e}"
                 
                 finally:
                     # 轉錄後立即刪除雲端檔案（醫療音訊不留存，否則預設保留 48 小時）
                     if gemini_file is not None:
                         try:
                             client.files.delete(name=gemini_file.name)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            st.session_state["delete_failures"].append(f"{result_key}（{gemini_file.name}）：{e}")
                 
                 # 更新進度條
                 progress_bar.progress((index + 1) / len(uploaded_files))
@@ -123,6 +146,12 @@ else:
         if st.session_state["batch_outputs"]:
             st.write("---")
             st.markdown("### 📥 轉錄結果下載與預覽")
+            
+            if st.session_state["delete_failures"]:
+                st.warning(
+                    "⚠️ 以下音訊未能從 Gemini 雲端刪除（預設將保留 48 小時），請至 Google AI Studio 手動刪除：\n\n"
+                    + "\n".join(f"- {f}" for f in st.session_state["delete_failures"])
+                )
             
             # 建立打包合併的文字
             combined_text = ""
