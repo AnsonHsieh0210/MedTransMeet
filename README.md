@@ -1,6 +1,6 @@
 # 🩺 MedTransMeet：醫療專科雲端 AI 批次語音轉錄系統
 
-以 Streamlit + Google Gemini（`gemini-2.5-flash`）將醫療會議錄音批次轉錄為繁體中文（台灣用語），並強化醫療資訊術語（FHIR、HL7、DICOM、SNOMED CT、LOINC、ICD-10、PACS 等）的辨識。
+以 Streamlit + Google Gemini（`gemini-3.8-flash`）將醫療會議錄音批次轉錄為繁體中文（台灣用語），並強化醫療資訊術語（FHIR、HL7、DICOM、SNOMED CT、LOINC、ICD-10、PACS 等）的辨識。
 
 ## 功能
 - 一次上傳多個音訊檔（m4a / mp3 / wav / mp4），依序自動轉錄
@@ -17,7 +17,15 @@
    ```
 3. 按 **Deploy**
 
-（另附 `Dockerfile`，也可部署到 Hugging Face Spaces 等支援 Docker 的平台。）
+## 以 Docker 部署（選用）
+另附 `Dockerfile`（Streamlit 監聽 8501 埠），以環境變數 `GEMINI_API_KEY` 提供金鑰：
+```bash
+docker build -t medtransmeet .
+docker run -p 8501:8501 -e GEMINI_API_KEY=你的金鑰 medtransmeet
+```
+部署到 Hugging Face Spaces（Docker SDK）時需額外：
+- 在 Space 的 `README.md` 開頭加上 `sdk: docker` 與 `app_port: 8501`
+- 在 `.streamlit/config.toml` 的 `[server]` 加上 `enableXsrfProtection = false`（HF 以 iframe 嵌入，否則上傳會出現 403）
 
 ## 本機執行
 ```bash

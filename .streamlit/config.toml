@@ -1,0 +1,7 @@
+[server]
+# 單檔上傳上限（MB）。多檔上傳時所有檔案都暫存在伺服器記憶體，
+# Streamlit Community Cloud 記憶體有限，不宜設太大
+maxUploadSize = 200
+
+[browser]
+gatherUsageStats = false
