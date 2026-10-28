@@ -10,8 +10,8 @@ from docx.oxml.ns import qn
 from docx.shared import Pt
 
 # 1. 網頁頁面設定
-st.set_page_config(page_title="醫療專科 雲端 AI 批次語音轉錄系統", layout="centered")
-st.title("🩺 醫療專科 雲端 AI 批次語音轉錄系統")
+st.set_page_config(page_title="雲端 AI 批次語音轉錄系統", layout="centered")
+st.title("🩺 雲端 AI 批次語音轉錄系統")
 
 MODEL = "gemini-3.8-flash"
 
