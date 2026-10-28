@@ -1,4 +1,5 @@
 import os
+import time
 from pathlib import Path
 import streamlit as st
 from google import genai
@@ -8,7 +9,12 @@ from google.genai import types
 st.set_page_config(page_title="醫療專科 雲端 AI 批次語音轉錄系統", layout="centered")
 st.title("🩺 醫療專科 雲端 AI 批次語音轉錄系統")
 st.subheader("運行環境: 雲端完全託管 (支援多檔案同時上傳)")
-
+MIME_TYPES = {
+    ".m4a": "audio/mp4",
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".mp4": "video/mp4",
+}
 # 2. 讀取 Google AI API Key
 if "GEMINI_API_KEY" in st.secrets:
     api_key = st.secrets["GEMINI_API_KEY"]
@@ -64,26 +70,43 @@ else:
                 filename = uploaded_file.name
                 status_text.markdown(f"⏳ 正在處理 ({index+1}/{len(uploaded_files)}): **{filename}**")
                 
+                 gemini_file = None
                 try:
-                    # 讀取單一檔案二進位資料
-                    audio_bytes = uploaded_file.read()
-                    audio_part = types.Part.from_bytes(
-                        data=audio_bytes,
-                        mime_type=uploaded_file.type,
+                    mime_type = MIME_TYPES[Path(filename).suffix.lower()]
+
+                    # 透過 Files API 上傳（避開 inline 資料約 20MB 的請求上限，支援長時間會議錄音）
+                    uploaded_file.seek(0)
+                    gemini_file = client.files.upload(
+                        file=uploaded_file,
+                        config=types.UploadFileConfig(mime_type=mime_type, display_name=filename),
                     )
-                    
+
+                    # 等待雲端處理完成
+                    while gemini_file.state == types.FileState.PROCESSING:
+                        time.sleep(2)
+                        gemini_file = client.files.get(name=gemini_file.name)
+                    if gemini_file.state == types.FileState.FAILED:
+                        raise RuntimeError("Gemini 檔案處理失敗")
+
                     # 呼叫 Gemini 2.5 模型
                     response = client.models.generate_content(
                         model='gemini-2.5-flash',
-                        contents=[medical_prompt, audio_part]
+                        contents=[medical_prompt, gemini_file]
                     )
-                    
+
                     # 將結果存入 session_state
                     st.session_state["batch_outputs"][filename] = response.text
-                    
+
                 except Exception as e:
                     st.session_state["batch_outputs"][filename] = f"❌ 轉錄發生錯誤: {e}"
-                
+
+                finally:
+                    # 轉錄後立即刪除雲端檔案（醫療音訊不留存，否則預設保留 48 小時）
+                    if gemini_file is not None:
+                        try:
+                            client.files.delete(name=gemini_file.name)
+                        except Exception:
+                            pass
                 # 更新進度條
                 progress_bar.progress((index + 1) / len(uploaded_files))
                 
