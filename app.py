@@ -47,7 +47,33 @@ ARTICLE_STYLES = {
         "數個附小標的段落，以及結論。適合刊登於院內刊物或部落格，讓非與會者也能理解討論內容與意義。\n"
         "請忠於逐字稿內容，不要捏造未提及的資訊。醫療資訊專有名詞請保持正確拼寫與大寫，首次出現時可簡短說明。"
     ),
+    "網站文章": (
+        "請根據以下逐字稿，撰寫一篇適合發布在網站上的繁體中文（台灣用語）文章，包含標題、引言、"
+        "數個附小標的段落，以及結尾。內容不一定是會議，請依逐字稿的實際性質撰寫。\n"
+        "若有提供【寫作風格指南】，請嚴格依照指南的語氣、結構、篇幅與用詞習慣撰寫。\n"
+        "請忠於逐字稿內容，不要捏造未提及的資訊。醫療資訊專有名詞請保持正確拼寫與大寫。"
+    ),
 }
+
+# 會套用寫作風格參考的文章類型
+STYLE_GUIDED_TYPES = {"網站文章"}
+
+# 參考文章的數量與總字數上限（避免費用失控）
+MAX_REFERENCE_ARTICLES = 5
+MAX_REFERENCE_CHARS = 30000
+
+STYLE_ANALYSIS_PROMPT = (
+    "你是一位資深編輯。請分析以下參考文章的寫作風格，整理成一份繁體中文的「寫作風格指南」，"
+    "讓其他寫手能依照指南寫出風格一致的新文章。請涵蓋：\n"
+    "1. 語氣與口吻（正式程度、人稱、情感溫度）\n"
+    "2. 目標讀者\n"
+    "3. 標題寫法（長度、句型、是否使用數字或問句）\n"
+    "4. 文章結構（開頭方式、段落安排、小標題用法、結尾方式）\n"
+    "5. 篇幅（全文與每段的大約字數）\n"
+    "6. 用詞與句型習慣（常用詞彙、專有名詞處理方式、句子長短）\n"
+    "7. 格式慣例（條列、粗體、引言、行動呼籲等）\n"
+    "只描述「怎麼寫」，不要摘錄或總結參考文章的內容與事實。以條列方式輸出。"
+)
 
 
 def _add_markdown(doc, text):
@@ -98,6 +124,20 @@ def build_docx(results):
     buffer = io.BytesIO()
     doc.save(buffer)
     return buffer.getvalue()
+
+
+def read_reference(uploaded_file):
+    """讀取上傳的參考文章（.docx / .txt / .md）為純文字"""
+    if Path(uploaded_file.name).suffix.lower() == ".docx":
+        return "\n".join(p.text for p in Document(uploaded_file).paragraphs if p.text.strip())
+    return uploaded_file.getvalue().decode("utf-8", errors="ignore")
+
+
+def load_style_guide_file():
+    """載入先前下載的風格指南檔案"""
+    guide_file = st.session_state.get("style_guide_file")
+    if guide_file is not None:
+        st.session_state["style_guide_text"] = guide_file.getvalue().decode("utf-8", errors="ignore")
 
 
 def build_txt(filename, result):
@@ -175,6 +215,88 @@ else:
                     key=f"article_prompt_{article_style}",
                 )
 
+            # 寫作風格參考：先分析參考文章產生風格指南，撰寫時只送指南（省費用、避免抄寫範例內容）
+            reference_texts = []
+            if article_style in STYLE_GUIDED_TYPES:
+                with st.expander("🎨 寫作風格參考", expanded=True):
+                    st.caption(
+                        "上傳或貼上您希望模仿風格的文章，系統會先分析成「風格指南」，撰寫時依指南的寫法產出。"
+                        "參考文章與指南僅存在本次瀏覽工作階段，不會被儲存。"
+                    )
+                    reference_files = st.file_uploader(
+                        f"上傳參考文章（.docx / .txt / .md，最多 {MAX_REFERENCE_ARTICLES} 篇）",
+                        type=["docx", "txt", "md"],
+                        accept_multiple_files=True,
+                        key="reference_files",
+                    )
+                    pasted_reference = st.text_area("或直接貼上參考文章（多篇請以一行 --- 分隔）", height=150)
+
+                    for reference_file in reference_files or []:
+                        try:
+                            reference_texts.append(read_reference(reference_file))
+                        except Exception as e:
+                            st.error(f"無法讀取「{reference_file.name}」：{e}")
+                    reference_texts += [t.strip() for t in pasted_reference.split("\n---\n") if t.strip()]
+                    reference_texts = [t for t in reference_texts if t.strip()]
+
+                    total_chars = sum(len(t) for t in reference_texts)
+                    too_many = len(reference_texts) > MAX_REFERENCE_ARTICLES or total_chars > MAX_REFERENCE_CHARS
+                    if reference_texts:
+                        st.write(f"已提供 {len(reference_texts)} 篇參考文章，共 {total_chars:,} 字。")
+                    if too_many:
+                        st.error(f"參考文章最多 {MAX_REFERENCE_ARTICLES} 篇、總計 {MAX_REFERENCE_CHARS:,} 字，請減少後再分析。")
+
+                    if st.button("🔍 分析寫作風格", disabled=not reference_texts or too_many):
+                        with st.spinner("正在分析寫作風格…"):
+                            try:
+                                articles = "\n\n".join(
+                                    f"【參考文章 {i}】\n{t}" for i, t in enumerate(reference_texts, start=1)
+                                )
+                                analysis = client.models.generate_content(
+                                    model=MODEL, contents=[STYLE_ANALYSIS_PROMPT, articles]
+                                )
+                                if not analysis.text:
+                                    raise RuntimeError("模型未回傳分析結果")
+                                st.session_state["style_guide_text"] = analysis.text
+                            except Exception as e:
+                                st.error(f"❌ 風格分析發生錯誤: {e}")
+
+                    st.file_uploader(
+                        "或載入先前下載的風格指南（.md / .txt）",
+                        type=["md", "txt"],
+                        key="style_guide_file",
+                        on_change=load_style_guide_file,
+                    )
+                    style_guide = st.text_area(
+                        "📋 寫作風格指南（可直接修改）",
+                        height=250,
+                        key="style_guide_text",
+                        placeholder="分析完成後會顯示在這裡，也可以自行撰寫。",
+                    )
+                    if style_guide.strip():
+                        st.download_button(
+                            "💾 下載風格指南（下次可直接載入沿用）",
+                            data=style_guide,
+                            file_name="style_guide.md",
+                            mime="text/markdown",
+                        )
+                    attach_references = st.checkbox(
+                        "進階：撰寫時同時附上參考文章原文（風格更貼近，但每篇文章的費用較高）",
+                        disabled=not reference_texts or too_many,
+                    )
+
+                # 組合最終撰寫指示
+                if style_guide.strip():
+                    article_prompt += f"\n\n【寫作風格指南】\n{style_guide.strip()}"
+                else:
+                    st.warning("尚未提供寫作風格指南，將以一般網站文章的寫法撰寫。")
+                if attach_references and not too_many:
+                    article_prompt += (
+                        "\n\n【參考範例】以下範例僅供模仿寫法，"
+                        "請勿沿用範例中的任何內容、事實或句子：\n\n"
+                        + "\n\n".join(f"〈範例 {i}〉\n{t}" for i, t in enumerate(reference_texts, start=1))
+                    )
+
         # 4. 開始批次執行轉錄
         if st.button("🚀 開始批次智慧醫療轉錄", type="primary"):
             # 建立一個進度條
@@ -240,7 +362,7 @@ else:
                         try:
                             article_response = client.models.generate_content(
                                 model=MODEL,
-                                contents=[article_prompt, f"【會議逐字稿】\n{result['transcript']}"]
+                                contents=[article_prompt, f"【逐字稿】\n{result['transcript']}"]
                             )
                             if not article_response.text:
                                 raise RuntimeError("模型未回傳文章內容")
