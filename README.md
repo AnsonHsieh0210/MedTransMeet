@@ -1,4 +1,4 @@
-# 🩺 MedTransMeet：醫療專科雲端 AI 批次語音轉錄系統
+# 🩺 MedTransMeet：雲端 AI 批次語音轉錄系統
 
 以 Streamlit + Google Gemini（`gemini-3.8-flash`）將醫療會議錄音批次轉錄為繁體中文（台灣用語），並強化醫療資訊術語（FHIR、HL7、DICOM、SNOMED CT、LOINC、ICD-10、PACS 等）的辨識。
 
