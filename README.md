@@ -2,6 +2,13 @@
 
 以 Streamlit + Google Gemini（`gemini-3.8-flash`）將醫療會議錄音批次轉錄為繁體中文（台灣用語），並強化醫療資訊術語（FHIR、HL7、DICOM、SNOMED CT、LOINC、ICD-10、PACS 等）的辨識。
 
+## 🌐 線上 Demo
+👉 **https://medtransmeet.streamlit.app/**
+
+使用時請在左側欄填入您自己的 Gemini API Key（[免費申請](https://aistudio.google.com/apikey)），轉錄費用由您的帳號支付。
+
+![MedTransMeet 網站畫面](docs/demo.png)
+
 ## 功能
 - 一次上傳多個音訊檔（m4a / mp3 / wav / mp4），依序自動轉錄
 - 透過 Gemini Files API 上傳，支援長時間會議錄音（不受 inline 20MB 限制）
