@@ -7,21 +7,19 @@
 - 透過 Gemini Files API 上傳，支援長時間會議錄音（不受 inline 20MB 限制）
 - 轉錄完成後立即刪除 Gemini 雲端上的音訊檔，不留存醫療資料
 - 可自訂醫療提示詞
-- 單檔下載 `.txt` 或一鍵下載合併檔 `combined_all.txt`
+- 轉錄後自動撰寫文章（會議紀錄／新聞稿／專題文章，提示詞可自訂）
+- 下載 Word（`.docx`，含文章與逐字稿原文）或文字檔，支援單檔與全部合併
+- 使用者自行填入 Gemini API Key，費用由使用者自己的帳號支付，網站不保存金鑰
 
 ## 部署到 Streamlit Community Cloud
 1. 到 https://share.streamlit.io 選 **Create app**，Repository 選本 repo，Branch `main`，Main file `app.py`
-2. 在 **Advanced settings → Secrets** 填入：
-   ```toml
-   GEMINI_API_KEY = "你的金鑰"
-   ```
-3. 按 **Deploy**
+2. 按 **Deploy**（不需設定 Secrets，使用者會在網頁左側欄填入自己的 API Key）
 
 ## 以 Docker 部署（選用）
-另附 `Dockerfile`（Streamlit 監聽 8501 埠），以環境變數 `GEMINI_API_KEY` 提供金鑰：
+另附 `Dockerfile`（Streamlit 監聽 8501 埠）：
 ```bash
 docker build -t medtransmeet .
-docker run -p 8501:8501 -e GEMINI_API_KEY=你的金鑰 medtransmeet
+docker run -p 8501:8501 medtransmeet
 ```
 部署到 Hugging Face Spaces（Docker SDK）時需額外：
 - 在 Space 的 `README.md` 開頭加上 `sdk: docker` 與 `app_port: 8501`
@@ -30,7 +28,6 @@ docker run -p 8501:8501 -e GEMINI_API_KEY=你的金鑰 medtransmeet
 ## 本機執行
 ```bash
 pip install -r requirements.txt
-export GEMINI_API_KEY=你的金鑰
 streamlit run app.py
 ```
 
