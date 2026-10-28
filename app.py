@@ -12,7 +12,6 @@ from docx.shared import Pt
 # 1. 網頁頁面設定
 st.set_page_config(page_title="醫療專科 雲端 AI 批次語音轉錄系統", layout="centered")
 st.title("🩺 醫療專科 雲端 AI 批次語音轉錄系統")
-st.subheader("運行環境: 雲端完全託管 (支援多檔案同時上傳)")
 
 MODEL = "gemini-3.8-flash"
 
@@ -131,8 +130,6 @@ if not api_key:
     )
 else:
     client = genai.Client(api_key=api_key.strip())
-
-    st.info("💡 系統已優化批次處理功能，您可以一次拖入多個音訊檔案進行自動化轉錄。")
 
     # 💡 關鍵更動：開啟 accept_multiple_files=True
     uploaded_files = st.file_uploader(
